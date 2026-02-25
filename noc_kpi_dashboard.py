@@ -2,13 +2,20 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="NOC KPI Dashboard", layout="wide")
+# =====================================
+# CONFIG
+# =====================================
+
+st.set_page_config(
+    page_title="NOC KPI Monitoring Dashboard",
+    layout="wide"
+)
 
 st.title("📊 NOC KPI Monitoring Dashboard")
 
-# ==============================
+# =====================================
 # LOAD DATA
-# ==============================
+# =====================================
 
 @st.cache_data
 def load_data():
@@ -19,45 +26,39 @@ def load_data():
 try:
     df = load_data()
 except Exception as e:
-    st.error("Error loading CSV file")
+    st.error(f"Error loading CSV: {e}")
     st.stop()
 
-st.write("Detected Columns:", df.columns.tolist())
+# =====================================
+# VALIDATION
+# =====================================
 
-# ==============================
-# VALIDASI KOLOM WAJIB
-# ==============================
+required_cols = ["date", "site", "traffic_gb", "availability", "lat", "lon"]
 
-required_columns = ["date", "site", "availability", "traffic_gb", "lat", "lon"]
-
-for col in required_columns:
+for col in required_cols:
     if col not in df.columns:
-        st.error(f"Required column '{col}' not found in dataset")
+        st.error(f"Missing required column: {col}")
         st.stop()
 
-# ==============================
-# DATA PREPARATION
-# ==============================
-
+# Convert date
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
-
 df = df.dropna(subset=["date"])
 
-# ==============================
+# =====================================
 # SIDEBAR FILTER
-# ==============================
+# =====================================
 
-st.sidebar.header("Filter")
+st.sidebar.header("🔎 Filter")
 
 site_list = ["All"] + sorted(df["site"].dropna().unique())
-selected_site = st.sidebar.selectbox("Select Site", site_list)
+selected_site = st.sidebar.selectbox("Site", site_list)
 
 date_range = st.sidebar.date_input(
-    "Select Date Range",
+    "Date Range",
     [df["date"].min(), df["date"].max()]
 )
 
-# Filter logic
+# Apply filters
 if selected_site != "All":
     df = df[df["site"] == selected_site]
 
@@ -66,9 +67,9 @@ df = df[
     (df["date"] <= pd.to_datetime(date_range[1]))
 ]
 
-# ==============================
+# =====================================
 # KPI SUMMARY
-# ==============================
+# =====================================
 
 col1, col2, col3 = st.columns(3)
 
@@ -78,30 +79,38 @@ col3.metric("Total Traffic (GB)", f"{df['traffic_gb'].sum():,.0f}")
 
 st.divider()
 
-# ==============================
+# =====================================
 # CONGESTION DETECTION
-# ==============================
+# =====================================
 
 st.subheader("🚨 Congestion Detection")
 
-congestion_threshold = st.slider("Availability Threshold (%)", 90, 100, 95)
+avail_threshold = st.slider("Availability Threshold (%)", 90, 100, 95)
 
-df["congestion"] = df["availability"] < congestion_threshold
+df["congestion_avail"] = df["availability"] < avail_threshold
 
-congestion_sites = df[df["congestion"] == True]
-
-st.write("Total Congested Records:", congestion_sites.shape[0])
-
-if not congestion_sites.empty:
-    st.dataframe(congestion_sites)
+if "prb" in df.columns:
+    prb_threshold = st.slider("PRB Threshold (%)", 70, 100, 85)
+    df["congestion_prb"] = df["prb"] > prb_threshold
 else:
-    st.success("No congestion detected 🎉")
+    df["congestion_prb"] = False
+
+df["congestion"] = df["congestion_avail"] | df["congestion_prb"]
+
+congestion_df = df[df["congestion"]]
+
+st.write("Total Congested Records:", congestion_df.shape[0])
+
+if not congestion_df.empty:
+    st.dataframe(congestion_df)
+else:
+    st.success("No congestion detected")
 
 st.divider()
 
-# ==============================
-# KPI TREND
-# ==============================
+# =====================================
+# AVAILABILITY TREND
+# =====================================
 
 st.subheader("📈 Availability Trend")
 
@@ -116,9 +125,9 @@ fig_trend = px.line(
 
 st.plotly_chart(fig_trend, use_container_width=True)
 
-# ==============================
-# GEO MAP
-# ==============================
+# =====================================
+# SITE MAP
+# =====================================
 
 st.subheader("🗺 Site Location Map")
 
@@ -131,11 +140,11 @@ if not map_df.empty:
         lon="lon",
         color="availability",
         hover_name="site",
-        zoom=5,
+        zoom=6,
         height=600
     )
 
     fig_map.update_layout(mapbox_style="open-street-map")
     st.plotly_chart(fig_map, use_container_width=True)
 else:
-    st.warning("No valid lat/lon data found for map")
+    st.warning("No valid lat/lon data available")
